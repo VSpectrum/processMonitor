@@ -425,7 +425,91 @@ impl Default for TerminalView {
     }
 }
 
+/// Command-line configuration for procmon.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Config {
+    pub interval: Duration,
+    pub top_n: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            interval: Duration::from_secs(1),
+            top_n: 15,
+        }
+    }
+}
+
+impl Config {
+    pub fn parse_from<I, T>(args: I) -> Result<Option<Self>, String>
+    where
+        I: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
+        let mut interval_secs: f64 = 1.0;
+        let mut top_n: usize = 15;
+        let mut iter = args.into_iter();
+
+        while let Some(arg) = iter.next() {
+            let s = arg.as_ref();
+            match s {
+                "-i" | "--interval" => {
+                    let val = iter
+                        .next()
+                        .ok_or_else(|| "Missing value for --interval / -i".to_string())?;
+                    interval_secs = val
+                        .as_ref()
+                        .parse::<f64>()
+                        .map_err(|_| format!("Invalid interval number: '{}'", val.as_ref()))?;
+                    if interval_secs <= 0.05 {
+                        return Err("Interval must be at least 0.05 seconds".to_string());
+                    }
+                }
+                "-n" | "--top" => {
+                    let val = iter
+                        .next()
+                        .ok_or_else(|| "Missing value for --top / -n".to_string())?;
+                    top_n = val
+                        .as_ref()
+                        .parse::<usize>()
+                        .map_err(|_| format!("Invalid top process count: '{}'", val.as_ref()))?;
+                    if top_n == 0 {
+                        return Err("Top process count must be greater than 0".to_string());
+                    }
+                }
+                "-h" | "--help" => {
+                    println!("PROCMON — macOS Real-Time Process Monitor\n");
+                    println!("Usage: procmon [OPTIONS]\n");
+                    println!("Options:");
+                    println!("  -i, --interval <SECS>   Update interval in seconds (default: 1.0, e.g. 2.0)");
+                    println!("  -n, --top <COUNT>       Number of top CPU processes to display (default: 15)");
+                    println!("  -h, --help              Show this help message and exit");
+                    return Ok(None);
+                }
+                unknown => {
+                    return Err(format!("Unknown option: '{}'. Run with --help for options.", unknown));
+                }
+            }
+        }
+
+        Ok(Some(Self {
+            interval: Duration::from_secs_f64(interval_secs),
+            top_n,
+        }))
+    }
+}
+
 fn main() {
+    let config = match Config::parse_from(std::env::args().skip(1)) {
+        Ok(Some(cfg)) => cfg,
+        Ok(None) => return,
+        Err(err) => {
+            eprintln!("Error: {}", err);
+            std::process::exit(1);
+        }
+    };
+
     // Install SIGINT and SIGTERM handlers for clean exit
     unsafe {
         signal(2, handle_termination_signal);  // SIGINT (Ctrl+C)
@@ -439,14 +523,14 @@ fn main() {
     monitor.tick();
 
     while RUNNING.load(Ordering::Relaxed) {
-        sleep(Duration::from_millis(1000));
+        sleep(config.interval);
         if !RUNNING.load(Ordering::Relaxed) {
             break;
         }
 
         monitor.tick();
-        let mut top_rows = Vec::with_capacity(15);
-        monitor.top_by_cpu(&mut top_rows, 15);
+        let mut top_rows = Vec::with_capacity(config.top_n);
+        monitor.top_by_cpu(&mut top_rows, config.top_n);
         view.render(&monitor, &top_rows);
     }
 }
@@ -479,5 +563,26 @@ mod tests {
         for i in 1..rows.len() {
             assert!(rows[i - 1].cpu_percent >= rows[i].cpu_percent);
         }
+    }
+
+    #[test]
+    fn test_config_parsing() {
+        let default_cfg = Config::parse_from(&[] as &[&str]).unwrap().unwrap();
+        assert_eq!(default_cfg.interval, Duration::from_secs(1));
+        assert_eq!(default_cfg.top_n, 15);
+
+        let custom_cfg = Config::parse_from(&["-i", "2.5", "-n", "20"]).unwrap().unwrap();
+        assert_eq!(custom_cfg.interval, Duration::from_millis(2500));
+        assert_eq!(custom_cfg.top_n, 20);
+
+        let help = Config::parse_from(&["--help"]).unwrap();
+        assert!(help.is_none());
+    }
+
+    #[test]
+    fn test_config_validation() {
+        assert!(Config::parse_from(&["-i", "-1"]).is_err());
+        assert!(Config::parse_from(&["-n", "0"]).is_err());
+        assert!(Config::parse_from(&["--invalid-flag"]).is_err());
     }
 }
