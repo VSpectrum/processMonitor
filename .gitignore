@@ -1,0 +1,26 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Note: Cargo.lock is intentionally tracked for reproducible builds
+# because this is an application/binary project.
+# If you ever want to ignore Cargo.lock, uncomment the following line:
+# Cargo.lock
+
+# macOS system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor and IDE configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Crash and profiling logs
+*.profraw
+*.profdata
