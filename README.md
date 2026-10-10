@@ -48,61 +48,76 @@ A lightweight, zero-dependency real-time terminal process monitor engineered spe
 
 ---
 
+## Quick Start & Building
+
+### 1. Build Standalone macOS App (Recommended)
+
+Run the automated macOS build script to compile the optimized binary and code sign it:
+
+```bash
+./build.sh
+```
+
+This generates:
+- `./bin/procmon` (executable)
+- `./procmon` (symlink in root directory)
+
+You can now run it immediately without `cargo run`:
+
+```bash
+./procmon
+```
+
+### 2. Install to Your PATH (Run from Anywhere)
+
+Install `procmon` directly into `~/.cargo/bin` (or custom `--install-dir`) so you can type `procmon` from any directory in any terminal:
+
+```bash
+./build.sh --install
+```
+
+Then simply run:
+
+```bash
+procmon
+procmon -i 2 -n 10
+```
+
+### 3. Build Script Options
+
+| Option | Description |
+| :--- | :--- |
+| `./build.sh` | Builds optimized release binary in `./bin/procmon` and `./procmon` |
+| `./build.sh --install` | Installs binary to `~/.cargo/bin` (in your `$PATH`) |
+| `./build.sh --install-dir <DIR>` | Installs binary to a custom directory (e.g. `/usr/local/bin`) |
+| `./build.sh --universal` | Compiles a Universal binary (Apple Silicon + Intel via `lipo`) |
+| `./build.sh --clean` | Runs `cargo clean` before building |
+| `./build.sh --help` | Shows usage and options |
+
+---
+
 ## How to Run
+
+### Standalone Executable
+
+```bash
+# Run local binary
+./procmon
+
+# Run with custom update interval (e.g., 2 seconds) and 10 top processes
+./procmon -i 2 -n 10
+
+# View all CLI options
+./procmon --help
+```
 
 ### Development Mode
 
-Run directly using Cargo:
+If working directly on the source code, you can also run using Cargo:
 
 ```bash
-cargo run
-```
-
-### Release Mode (Recommended)
-
-Build and execute the optimized binary for minimal CPU overhead:
-
-```bash
-cargo run --release
-```
-
-### CLI Options
-
-You can configure the update interval and the number of processes displayed:
-
-```bash
-# Update every 2 seconds, displaying top 10 processes
+cargo run -- -i 2
 cargo run --release -- -i 2 -n 10
-
-# View all command-line options
-cargo run -- --help
-```
-
-| Flag | Long Option | Description | Default |
-| :--- | :--- | :--- | :--- |
-| `-i <SECS>` | `--interval <SECS>` | Refresh interval in seconds (e.g. `0.5`, `2.0`, `5.0`) | `1.0` |
-| `-n <COUNT>` | `--top <COUNT>` | Number of top CPU processes to display | `15` |
-| `-h` | `--help` | Display usage information and exit | — |
-
-### Building a Standalone Binary
-
-Compile the standalone executable:
-
-```bash
-cargo build --release
-```
-
-The resulting binary will be located at:
-
-```bash
-./target/release/procmon
-```
-
-You can copy or symlink this binary into your `$PATH` (e.g. `/usr/local/bin` or `~/.cargo/bin`) to run it from anywhere:
-
-```bash
-# Run standalone with custom interval
-procmon -i 2
 ```
 
 ### Running with Elevated Privileges (Optional)

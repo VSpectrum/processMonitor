@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+/bin/
+/procmon
 **/*.rs.bk
 
 # Note: Cargo.lock is intentionally tracked for reproducible builds
