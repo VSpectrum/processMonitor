@@ -207,6 +207,7 @@ echo -e ""
 echo -e "${BOLD}How to run:${RESET}"
 echo -e "  ${CYAN}./procmon${RESET}              # Run directly from this directory"
 echo -e "  ${CYAN}./procmon -i 2 -n 10${RESET}   # 2-second interval, top 10 processes"
+echo -e "  ${CYAN}./procmon --sort ram${RESET}   # sort by resident memory"
 echo -e "  ${CYAN}sudo ./procmon${RESET}         # Elevated privileges (inspect root daemons)"
 if [[ "$DO_INSTALL" == true ]]; then
     echo -e "  ${CYAN}procmon${RESET}                # Run from anywhere in any terminal"

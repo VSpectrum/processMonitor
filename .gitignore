@@ -26,3 +26,7 @@
 # Crash and profiling logs
 *.profraw
 *.profdata
+
+# Spike logs if --log is pointed at the repo
+procmon-spikes.log
+spikes.log

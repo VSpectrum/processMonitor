@@ -11,6 +11,8 @@ A lightweight, zero-dependency real-time terminal process monitor engineered spe
 - **Direct macOS Kernel Telemetry**: Interfaces directly with macOS `libproc` C APIs (`proc_listpids`, `proc_pidinfo`, `proc_name`) without invoking external CLI tools like `ps` or `top`.
 - **Zero External Dependencies**: Implemented entirely with Rust's standard library and Darwin libc bindings for instant compilation and a compact binary footprint.
 - **Peak Resource Tracking**: Records both current and peak CPU% and RAM (RSS) metrics across process lifespans.
+- **Sortable table**: Starts on CPU% (highest first). Change it with `--sort` or with a key while the monitor is running: RAM, peak CPU, peak RAM, PID, name, or ticks.
+- **Spike log**: Appends CPU crossings and short-lived bursts to a log so a process that spikes and disappears is still visible. Lines are queued in memory and written in batches.
 - **System Aggregates**: Displays total monitored memory, aggregated CPU load, active PID count, monitor ticks, and uptime.
 - **Flicker-Free Terminal UI**: Uses the alternate screen buffer (`\x1b[?1049h`), in-place cursor repositioning, and double-buffering / frame dirty checking to avoid flickering and terminal scroll pollution.
 - **Low-Overhead Performance**:
@@ -27,7 +29,7 @@ A lightweight, zero-dependency real-time terminal process monitor engineered spe
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ PROCMON — macOS Process Monitor         Tick: #42     Active PIDs: 485    Uptime: 00:00:42 │
-│ Total Monitored RAM:   4821.5 MB         Total System Process CPU:   18.4%              │
+│ Total RAM:   4821.5 MB   CPU:   18.4%   Sort: CPU% (highest first)                     │
 ├────────┬──────────────────────────┬──────────┬──────────┬───────────┬───────────┬──────┤
 │ PID    │ NAME                     │    CPU % │ PEAK CPU │  RAM (MB) │  PEAK RAM │ TICKS│
 ├────────┼──────────────────────────┬──────────┬──────────┬───────────┬───────────┬──────┤
@@ -36,7 +38,8 @@ A lightweight, zero-dependency real-time terminal process monitor engineered spe
 │ 3120   │ Google Chrome Helper     │     1.8% │    22.0% │     340.5 │     410.2 │   42 │
 │ 81402  │ procmon                  │     0.1% │     0.3% │       4.2 │       4.5 │   42 │
 └────────┴──────────────────────────┴──────────┴──────────┴───────────┴───────────┴──────┘
- [Ctrl+C to quit]  Tracking 42 historical snapshots
+ log ~/Library/Logs/procmon/spikes.log >=25% queued=0 saved=0
+ [c] CPU  [m] RAM  [C] peak CPU  [M] peak RAM  [p] PID  [n] name  [t] ticks  [q] quit
 ```
 
 ---
@@ -107,6 +110,12 @@ procmon -i 2 -n 10
 # Run with custom update interval (e.g., 2 seconds) and 10 top processes
 ./procmon -i 2 -n 10
 
+# Start sorted by resident memory instead of CPU
+./procmon --sort ram
+
+# Log CPU crossings at 40% or above, holding lines for up to 60 seconds
+./procmon --spike 40 --log-flush 60
+
 # View all CLI options
 ./procmon --help
 ```
@@ -157,8 +166,14 @@ sudo ./target/release/procmon
 - Uses atomic stdout locking and single-call buffer flushing to prevent tearing and cursor flicker.
 
 ### 6. True Kernel Sleep (Zero Busy-Waiting)
-- Between sample cycles, `procmon` calls `std::thread::sleep`, yielding 100% of execution time back to the macOS thread scheduler.
-- The thread stays dormant until the kernel wakes it up, using zero CPU cycles between ticks.
+- Between sample cycles, `procmon` blocks in `poll`, yielding the CPU back to the macOS scheduler.
+- The same wait returns early for a sort key or for Ctrl-C. There is no input-polling thread and no busy loop.
+- The thread stays dormant until the kernel wakes it up, using no CPU between ticks.
+
+### 7. Batched Spike Log
+- A spike line is formatted into an in-memory buffer. The file is opened once, on the first flush, and kept open.
+- Disk writes happen when the buffer reaches 8 KiB, when the oldest queued line is 30 seconds old (`--log-flush`), or when the process exits.
+- There is no `fsync`. A quiet run with no spikes never creates the file.
 
 ---
 
@@ -178,11 +193,49 @@ If you plan to run `procmon` continuously in the background or want to maximize 
 
 ---
 
+## Sorting
+
+The table starts sorted by current CPU%, highest first. `--sort` / `-s` picks the starting column. In a terminal, the keys below switch columns immediately and the next sample still happens on the original interval.
+
+| `--sort` value | Keys | Top of the table |
+| :--- | :--- | :--- |
+| `cpu` (default) | `c` | Highest CPU% |
+| `ram`, `mem`, `memory`, `rss` | `m` or `r` | Highest resident memory |
+| `peak-cpu` | `C` | Highest CPU% seen for that process |
+| `peak-ram`, `peak-mem` | `M` or `R` | Highest resident memory seen |
+| `pid` | `p` | Lowest PID |
+| `name` | `n` | Name, A to Z |
+| `ticks` | `t` | Longest time on screen |
+
+`Ctrl-Z` suspends the monitor and puts the terminal back the way it was. `fg` resumes it.
+
+## Spike Log
+
+`procmon` keeps a log of CPU spikes so a process that flares up and exits is not lost when it drops out of the table.
+
+| Event | When it is recorded |
+| :--- | :--- |
+| `SPIKE` | CPU% crosses `--spike` (default 25). It is not recorded again until CPU falls below half that threshold and crosses it once more. |
+| `GONE` | A process whose peak CPU reached the threshold has exited. Includes the peak and how long it was watched. |
+| `BURST` | A process vanished inside a single sample, was only a few seconds old, and had already used at least 50ms of CPU at or above the threshold. |
+
+Very short spikes can still hide between samples. A smaller `-i` (for example `0.5`) shortens that gap. The default 1 second interval is what keeps `procmon` itself well under 1% CPU.
+
+Lines sit in memory and are written together. The default file is `~/Library/Logs/procmon/spikes.log`. Nothing is created until the first event. `--log <PATH>` moves the file, `--no-log` turns it off, and `--log-flush <SECS>` caps how long a line waits (minimum 1 second, default 30). Ctrl-C writes the queue before exit. `kill -9` can drop whatever is still only in memory.
+
+```text
+2026-11-13T05:27:01-05:00 SPIKE pid=12845 cpu=82.4 peak_cpu=82.4 ram_mb=120.5 peak_ram_mb=120.5 ticks=4 name="rustc"
+2026-11-13T05:27:03-05:00 GONE pid=12845 last_cpu=4.0 peak_cpu=82.4 ram_mb=20.1 peak_ram_mb=140.2 ticks=6 tracked_s=5.0 name="rustc"
+```
+
 ## Controls
 
 | Key / Action | Description |
 | :--- | :--- |
-| `Ctrl + C` | Gracefully quit the monitor and restore terminal state |
+| `c` / `m` / `C` / `M` | Sort by CPU, RAM, peak CPU, or peak RAM |
+| `p` / `n` / `t` | Sort by PID, name, or ticks seen |
+| `q` or `Ctrl + C` | Quit and flush the spike log |
+| `Ctrl + Z` | Suspend and restore the terminal; `fg` resumes |
 
 ---
 
